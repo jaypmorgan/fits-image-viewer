@@ -57,7 +57,7 @@ value / comment string'"
   (let ((v (string-trim (car (string-split (cadr tokens) "/")))))
     (cond ((string= "" v) "")
 	  ((string= "'" (substring v 0 1)) (string-trim (string-trim v "'" "'")))
-	  ((string= "T" v) t)
+	  ((string= "T" v) "T")  ;; leave as string
 	  (t (string-to-number v)))))
 
 (defun fits-image-viewer--parsed-header-get-comment (tokens)
@@ -114,8 +114,16 @@ be extracted for later use."
 
 (setq fits-image-viewer--test-file "./mh140831.075241.fits")
 
+;;; Read HDU
+;;;
+;;; These functions pertain the reading of particular HDU segments of the
+;;; FITS file format. In particular we have the reading of a header as formatted
+;;; by a key = value / comment string. The next read function is for reading
+;;; a stream of data (if there is one). We need the information in the header
+;;; to know how to read this data.
 
 (defun fits-image-viewer--read-header (filename)
+  "Read the header HDU from the FILENAME"
   (cl-labels ((reader (iteration)
 		(let ((coding-system-for-read 'binary))
 		  (with-temp-buffer
@@ -135,23 +143,34 @@ be extracted for later use."
       (insert-file-contents
        filename nil (* 1 fits-image-viewer--segment-length)))))
 
+;;; Define Major Mode
+;;;
+;;; This next section of code setups the major mode and the hook for
+;;; its auto-activation upon reading files with a '.fits'
+;;; extension. The major mode will read the filename of the
+;;; buffer-file-name, grap the header content, and format it in the
+;;; buffer instead of the actual content.
 
 (define-derived-mode fits-image-viewer-mode
   org-mode "FITS"
   "Major mode for viewing FITS file contents"
-  (erase-buffer)
-  (let* ((header (fits-image-viewer--read-header (buffer-file-name)))
-	 (nrows  (length header))
-	 (ncols  3))
-    (table-insert ncols nrows)
-    (dolist (name (list "Key" "Value" "Comment"))
-      (table-insert-sequence name 1 1 1 'left)
-      (table-forward-cell))
-    (dolist (hu (take 2 header))
-      (dolist (item hu)
-	(table-insert-sequence (format "%s" item) 1 1 1 'left)
-	(table-forward-cell))))
-  (read-only-mode t))
+  (erase-buffer)  ;; remove the contents of the original file from this buffer
+  (setq-local org-hide-emphasis-markers t)  ;; hide */ in local buffer only
+  (let ((header (fits-image-viewer--read-header (buffer-file-name))))
+    ;; print out the header unit as a formatted table using bold font
+    ;; for the key, normal for the value, and italic for the comment
+    ;; if there is one.  We're using org-emphasis-markers to take
+    ;; advantage of this being derived from an org-mode buffer.
+    (dolist (hu header)  ;; iterate through the key=value pairs
+      (insert (format
+	       "%-12s%-30s %-10s\n"
+	       (format "*%s*" (fits-image-viewer--header-get-key hu))
+	       (fits-image-viewer--header-get-value hu)
+	       (let ((comment (fits-image-viewer--header-get-comment hu)))
+		 (or (and (string= "" comment) "")
+		     (format "\/%s\/" comment)))))))
+  (read-only-mode t)
+  (beginning-of-buffer))
 
 (add-to-list 'auto-mode-alist '("\\.fits\\'" . fits-image-viewer-mode))
 
