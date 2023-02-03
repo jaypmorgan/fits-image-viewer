@@ -47,51 +47,76 @@
 ;; If the data within the segment is less than this amount, it will be
 ;; padded with ASCII blanks or NULLs to fit to length.
 
-;; Each header unit contains key = value pairs in the format:
-;; KEYNAME = value / comment string
-
-(setq fits-image-viewer---test-header-line
-      "KEYNAME = value / comment string")
-
-(setq fits-image-viewer---test-header-line-no-comment
-      "KEYNAME = value")
-
-(setq fits-image-viewer---test-header-lines
-      "SIMPLE  =                    T / file conforms to FITS standard
-BITPIX  =                   16 / number of bits per data pixel
-NAXIS   =                    2 / number of data axes
-NAXIS1  =                  440 / length of data axis 1
-NAXIS2  =                  300 / length of data axis 2")
-
 (defun fits-image-viewer--parsed-header-get-key (tokens)
   "Returns KEYNAME from a list of TOKENS of header line 'KEYNAME =
 value / comment string'"
-  (car tokens))
+  (string-trim (car tokens)))
 
 (defun fits-image-viewer--parsed-header-get-value (tokens)
   "Gets the value of a parsed header line as a list of TOKENS"
-  (caddr tokens))
+  (string-trim (car (string-split (cadr tokens) "/"))))
 
 (defun fits-image-viewer--parsed-header-get-comment (tokens)
   "Gets the comment from a parsed header line as a list of TOKENS"
-  (string-join (cddddr tokens) " "))
+  (let ((comment (cadr (string-split (cadr tokens) "/"))))
+    (unless (null comment)
+      (string-trim comment))))
+
+(defun fits-image-viewer--parse-header-split-line (line)
+  "Split a single header unit LINE into multiple tokens"
+  (list (substring line 0 8)
+	(substring line 9)))
 
 (defun fits-image-viewer--parse-header-line (line)
   "Given a single LINE (string) from a header unit of a HDU, convert
 the string into a series of tokens upon which specific tokens can
 be extracted for later use."
-  (let ((tokens (string-split line)))
+  (let ((tokens (fits-image-viewer--parse-header-split-line line)))
     (list
      (fits-image-viewer--parsed-header-get-key tokens)
      (fits-image-viewer--parsed-header-get-value tokens)
      (fits-image-viewer--parsed-header-get-comment tokens))))
 
+(defun fits-image-viewer--split-header-lines (lines)
+  (if (string= "" lines)
+      nil
+    (cons (substring lines 0 80)
+	  (fits-image-viewer--split-header-lines (substring lines 80)))))
+
+
+(defun fits-image-viewer--header-get-key (header-line)
+  (car header-line))
+
+(defun fits-image-viewer--parse-header-reduce (lines)
+  (cl-remove-if
+   '(lambda (line)
+      (let ((key (fits-image-viewer--header-get-key line)))
+	(or (string= "END" key) (string= "" key))))
+   lines))
+
 (defun fits-image-viewer--parse-header-lines (lines)
   "Parse many header unit LINES"
-  (cond ((stringp lines) (fits-image-viewer--parse-header-lines (string-split lines "\n")))
+  (cond ((stringp lines) (fits-image-viewer--parse-header-lines
+			  (fits-image-viewer--split-header-lines lines)))
 	((null lines) nil)
 	(t (cons (fits-image-viewer--parse-header-line (car lines))
 		 (fits-image-viewer--parse-header-lines (cdr lines))))))
+
+(setq fits-image-viewer--test-file "./mh140831.075241.fits")
+
+(defun fits-image-viewer--read-header (filename)
+  (cl-labels ((reader (iteration)
+	     (let ((coding-system-for-read 'binary))
+	       (with-temp-buffer
+		 (insert-file-contents
+		  filename nil 0 (* iteration fits-image-viewer--segment-length))
+		 (let ((contents (buffer-string)))
+		   (if (string-match-p "\sEND\s" contents)
+		       contents
+		     (reader (+ 1 iteration))))))))
+    (fits-image-viewer--parse-header-reduce
+     (fits-image-viewer--parse-header-lines
+      (reader 1)))))
 
 (provide 'fits-image-viewer)
 ;;; fits-image-viewer.el ends here
