@@ -35,6 +35,8 @@
 
 ;;; Code:
 
+(require 'bindat)  ;; byte (un)packing
+
 ;; A FITS file is comprised of a segments called Header Data Units
 ;; (HDU). The first segment is called the primary HDU. Every HDU
 ;; consists of a Header, containing some key = value data, and this
@@ -137,11 +139,21 @@ be extracted for later use."
      (fits-image-viewer--parse-header-lines
       (reader 1)))))
 
+(defconst sint16-bindat-spec
+  (let* ((max (ash 1 15))
+         (wrap (+ max max)))
+    (bindat-type :pack-var v
+                 (n uint 16 :pack-val (if (< v 0) (+ v wrap) v))
+                 :unpack-val (if (>= n max) (- n wrap) n))))
+
+(defun fits-image-viewer--decode-byte (str binspec)
+  (bindat-unpack binspec str))
+
 (defun fits-image-viewer--read-data (filename)
   (let ((coding-system-for-read 'binary))
     (with-temp-buffer
-      (insert-file-contents
-       filename nil (* 1 fits-image-viewer--segment-length)))))
+      (insert-file-contents-literally filename (* 1 fits-image-viewer--segment-length))
+      (let ((contents (buffer-string)))))))
 
 ;;; Define Major Mode
 ;;;
@@ -163,7 +175,7 @@ be extracted for later use."
     ;; advantage of this being derived from an org-mode buffer.
     (dolist (hu header)  ;; iterate through the key=value pairs
       (insert (format
-	       "%-12s%-30s %-10s\n"
+	       "%-15s%-30s %-10s\n"
 	       (format "*%s*" (fits-image-viewer--header-get-key hu))
 	       (fits-image-viewer--header-get-value hu)
 	       (let ((comment (fits-image-viewer--header-get-comment hu)))
