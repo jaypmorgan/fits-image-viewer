@@ -54,7 +54,11 @@ value / comment string'"
 
 (defun fits-image-viewer--parsed-header-get-value (tokens)
   "Gets the value of a parsed header line as a list of TOKENS"
-  (string-trim (car (string-split (cadr tokens) "/"))))
+  (let ((v (string-trim (car (string-split (cadr tokens) "/")))))
+    (cond ((string= "" v) "")
+	  ((string= "'" (substring v 0 1)) (string-trim (string-trim v "'" "'")))
+	  ((string= "T" v) t)
+	  (t (string-to-number v)))))
 
 (defun fits-image-viewer--parsed-header-get-comment (tokens)
   "Gets the comment from a parsed header line as a list of TOKENS"
@@ -87,6 +91,12 @@ be extracted for later use."
 (defun fits-image-viewer--header-get-key (header-line)
   (car header-line))
 
+(defun fits-image-viewer--header-get-value (header-line)
+  (cadr header-line))
+
+(defun fits-image-viewer--header-get-comment (header-line)
+  (caddr header-line))
+
 (defun fits-image-viewer--parse-header-reduce (lines)
   (cl-remove-if
    '(lambda (line)
@@ -104,19 +114,46 @@ be extracted for later use."
 
 (setq fits-image-viewer--test-file "./mh140831.075241.fits")
 
+
 (defun fits-image-viewer--read-header (filename)
   (cl-labels ((reader (iteration)
-	     (let ((coding-system-for-read 'binary))
-	       (with-temp-buffer
-		 (insert-file-contents
-		  filename nil 0 (* iteration fits-image-viewer--segment-length))
-		 (let ((contents (buffer-string)))
-		   (if (string-match-p "\sEND\s" contents)
-		       contents
-		     (reader (+ 1 iteration))))))))
+		(let ((coding-system-for-read 'binary))
+		  (with-temp-buffer
+		    (insert-file-contents
+		     filename nil 0 (* iteration fits-image-viewer--segment-length))
+		    (let ((contents (buffer-string)))
+		      (if (string-match-p "\sEND\s" contents)
+			  contents
+			(reader (+ 1 iteration))))))))
     (fits-image-viewer--parse-header-reduce
      (fits-image-viewer--parse-header-lines
       (reader 1)))))
+
+(defun fits-image-viewer--read-data (filename)
+  (let ((coding-system-for-read 'binary))
+    (with-temp-buffer
+      (insert-file-contents
+       filename nil (* 1 fits-image-viewer--segment-length)))))
+
+
+(define-derived-mode fits-image-viewer-mode
+  org-mode "FITS"
+  "Major mode for viewing FITS file contents"
+  (erase-buffer)
+  (let* ((header (fits-image-viewer--read-header (buffer-file-name)))
+	 (nrows  (length header))
+	 (ncols  3))
+    (table-insert ncols nrows)
+    (dolist (name (list "Key" "Value" "Comment"))
+      (table-insert-sequence name 1 1 1 'left)
+      (table-forward-cell))
+    (dolist (hu (take 2 header))
+      (dolist (item hu)
+	(table-insert-sequence (format "%s" item) 1 1 1 'left)
+	(table-forward-cell))))
+  (read-only-mode t))
+
+(add-to-list 'auto-mode-alist '("\\.fits\\'" . fits-image-viewer-mode))
 
 (provide 'fits-image-viewer)
 ;;; fits-image-viewer.el ends here
